@@ -1,0 +1,44 @@
+title: Android version bumper
+summary: |-
+  Bumps an Android project version.
+description: |-
+  Bumps an Android project version based on bump type.
+website: https://github.com/thefuntasty/bitrise-step-bump-android
+source_code_url: https://github.com/thefuntasty/bitrise-step-bump-android
+support_url: https://github.com/thefuntasty/bitrise-step-bump-android/issues
+host_os_tags:
+  - "ubuntu"
+project_type_tags:
+  - android
+type_tags:
+  - bump
+  - version
+  - semver
+is_requires_admin_user: false
+is_always_run: false
+is_skippable: false
+deps:
+  brew:
+  - name: go
+  apt_get:
+  - name: golang
+    bin_name: go
+toolkit:
+  go:
+    package_name: github.com/thefuntasty/bitrise-step-bump-android
+inputs:
+  - bump_type: $BUMP_TYPE
+    opts:
+      title: Bump type
+      description: |
+        Must be one of major, minor or patch.
+      is_required: true
+outputs:
+  - BUMP_VERSION_NAME: ""
+    opts:
+      title: New version name
+      summary: New Android project version name
+  - BUMP_VERSION_CODE: ""
+    opts:
+      title: New version code
+      summary: New Android project version code
