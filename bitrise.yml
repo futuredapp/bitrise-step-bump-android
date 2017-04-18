@@ -11,25 +11,33 @@ workflows:
     - test-major
     - test-minor
     - test-patch
+    - test-none
 
   test-major:
     envs:
-    - SAMPLE_APP_GIT_CLONE_URL: https://bitbucket.org/thefuntasty/radim.git
+    - SAMPLE_APP_GIT_CLONE_URL: $SAMPLE_APP_GIT_CLONE_URL
     - BUMP_TYPE: major
     after_run:
     - _common
 
   test-minor:
     envs:
-    - SAMPLE_APP_GIT_CLONE_URL: https://bitbucket.org/thefuntasty/radim.git
+    - SAMPLE_APP_GIT_CLONE_URL: $SAMPLE_APP_GIT_CLONE_URL
     - BUMP_TYPE: minor
     after_run:
     - _common
 
   test-patch:
     envs:
-    - SAMPLE_APP_GIT_CLONE_URL: https://bitbucket.org/thefuntasty/radim.git
+    - SAMPLE_APP_GIT_CLONE_URL: $SAMPLE_APP_GIT_CLONE_URL
     - BUMP_TYPE: patch
+    after_run:
+    - _common
+
+  test-none:
+    envs:
+    - SAMPLE_APP_GIT_CLONE_URL: $SAMPLE_APP_GIT_CLONE_URL
+    - BUMP_TYPE: none
     after_run:
     - _common
 

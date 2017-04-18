@@ -19,6 +19,11 @@ type ConfigsModel struct {
 	BumpType string
 }
 
+type Versions struct {
+	Code int
+	Name string
+}
+
 func createConfigsModelFromEnvs() ConfigsModel {
 	return ConfigsModel{
 		BumpType: os.Getenv("bump_type"),
@@ -31,7 +36,7 @@ func (configs ConfigsModel) print() {
 }
 
 func (configs ConfigsModel) validate() (string, error) {
-	bumpTypes := []string{"major", "minor", "patch"}
+	bumpTypes := []string{"major", "minor", "patch", "none"}
 	if !sliceutil.IsStringInSlice(configs.BumpType, bumpTypes) {
 		return "", errors.New("Invalid bump type!")
 	}
@@ -65,48 +70,78 @@ func find(dir, nameInclude string) ([]string, error) {
 	return files, nil
 }
 
-func getVersionsFromFile(file string) (string, string, error) {
+func getVersionsFromFile(file string) (Versions, error) {
 	bytes, err := ioutil.ReadFile(file)
 	if err != nil {
-		return "", "", err
+		return Versions{}, err
 	}
 	re := regexp.MustCompile(`versionName\s+"([0-9.]+)"`)
 	matchesName := re.FindStringSubmatch(string(bytes))
 
 	if len(matchesName) != 2 {
-		return "", "", errors.New("Failed to match `versionName`")
+		return Versions{}, errors.New("Failed to match `versionName`")
 	}
 
 	re = regexp.MustCompile(`versionCode\s+(\d+)`)
 	matchesCode := re.FindStringSubmatch(string(bytes))
 
 	if len(matchesCode) != 2 {
-		return "", "", errors.New("Failed to match `versionCode`")
+		return Versions{}, errors.New("Failed to match `versionCode`")
 	}
 
-	return matchesCode[1], matchesName[1], nil
+	versionCode, err := strconv.ParseInt(matchesCode[1], 10, 32)
+	if err != nil {
+		return Versions{}, err
+	}
+
+	return Versions{
+		Name: matchesName[1],
+		Code: int(versionCode),
+	}, nil
 }
 
-func setVersionsToFile(file string, versionCode int, versionName string) error {
+func bumpVersions(bumpType string, versions Versions) (Versions, error) {
+	versionName, err := semver.NewVersion(versions.Name)
+	if err != nil {
+		return Versions{}, err
+	}
+
+	switch bumpType {
+	case "major":
+		versionName.BumpMajor()
+	case "minor":
+		versionName.BumpMinor()
+	case "patch":
+		versionName.BumpPatch()
+	default:
+	}
+
+	return Versions{
+		Name: versionName.String(),
+		Code: versions.Code + 1,
+	}, nil
+}
+
+func setVersionsToFile(file string, versions Versions) error {
 	bytes, err := ioutil.ReadFile(file)
 	if err != nil {
 		return err
 	}
 
 	re := regexp.MustCompile(`versionName\s+"([0-9.]+)"`)
-	body := re.ReplaceAllString(string(bytes), "versionName \"" + versionName + "\"")
+	body := re.ReplaceAllString(string(bytes), "versionName \"" + versions.Name + "\"")
 
 	re = regexp.MustCompile(`versionCode\s+(\d+)`)
-	body = re.ReplaceAllString(body, "versionCode " + strconv.Itoa(versionCode))
+	body = re.ReplaceAllString(body, "versionCode " + strconv.Itoa(versions.Code))
 
 	ioutil.WriteFile(file, []byte(body), 0644)
 
 	return nil
 }
 
-func exportEnvironmentWithEnvman(keyStr, valueStr string) error {
-	cmd := command.New("envman", "add", "--key", keyStr)
-	cmd.SetStdin(strings.NewReader(valueStr))
+func exportEnvironmentWithEnvman(key, value string) error {
+	cmd := command.New("envman", "add", "--key", key)
+	cmd.SetStdin(strings.NewReader(value))
 	return cmd.Run()
 }
 
@@ -150,57 +185,65 @@ func main() {
 	for _, buildGradleFile := range buildGradleFiles {
 		log.Info("Current versions:")
 
-		versionCode, versionName, err := getVersionsFromFile(buildGradleFile)
-		versionCodeInt, err := strconv.ParseInt(versionCode, 10, 32)
+		versions, err := getVersionsFromFile(buildGradleFile)
 		if err != nil {
-			log.Fail("Failed to get `versionName` or `versionCode`: %s", err)
+			log.Fail("Failed to get versions: %s", err)
 		}
-		log.Detail("versionCode: %d", versionCodeInt)
-		log.Detail("versionName: %s", versionName)
+		log.Detail("versionCode: %d", versions.Code)
+		log.Detail("versionName: %s", versions.Name)
 
-		version, err := semver.NewVersion(versionName)
+		newVersions, err := bumpVersions(configs.BumpType, versions)
 		if err != nil {
-			log.Fail("Failed to parse `versionName`: %s", err)
+			log.Fail("Failed to bump versions: %s", err)
 		}
 
-		switch configs.BumpType {
-		case "major":
-			version.BumpMajor()
-		case "minor":
-			version.BumpMinor()
-		case "patch":
-			version.BumpPatch()
-		}
 
 		log.Info("New versions:")
-		newVersionCode := int(versionCodeInt + 1)
-		log.Detail("versionCode: %d", newVersionCode)
-		log.Detail("versionName: %s", version.String())
+		log.Detail("versionCode: %d", newVersions.Code)
+		log.Detail("versionName: %s", newVersions.Name)
 
-		if err := exportEnvironmentWithEnvman("BUMP_VERSION_CODE", strconv.Itoa(int(newVersionCode))); err != nil {
+		if err := exportEnvironmentWithEnvman("BUMP_VERSION_CODE", strconv.Itoa(newVersions.Code)); err != nil {
 			log.Fail("Failed to export enviroment (BUMP_VERSION_CODE): %s", err)
 		}
-		if err := exportEnvironmentWithEnvman("BUMP_VERSION_NAME", version.String()); err != nil {
+		if err := exportEnvironmentWithEnvman("BUMP_VERSION_NAME", newVersions.Name); err != nil {
 			log.Fail("Failed to export enviroment (BUMP_VERSION_CODE): %s", err)
 		}
 
-		if err := setVersionsToFile(buildGradleFile, newVersionCode, version.String()); err != nil {
+		if err := setVersionsToFile(buildGradleFile, newVersions); err != nil {
 			log.Fail("Failed to export enviroment (BUMP_VERSION_CODE): %s", err)
 		}
 
 		log.Info("Git diff:")
-		gitCommand("diff", buildGradleFile)
+		if err := gitCommand("diff", buildGradleFile); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 
-		gitCommand("add", buildGradleFile)
+		if err := gitCommand("add", buildGradleFile); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 
-		gitCommand("commit", "-m", "Bump version to " + version.String())
+		if err := gitCommand("commit", "-m", "Bump version to " + newVersions.Name); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 
-		gitCommand("push", "origin", "HEAD")
+		if err := gitCommand("push", "origin", "HEAD"); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 
-		gitCommand("checkout", "master")
+		if err := gitCommand("checkout", "master"); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 
-		gitCommand("merge", "develop")
+		if err := gitCommand("merge", "develop"); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 
-		gitCommand("push", "origin", "HEAD")
+		if err := gitCommand("tag", "-a", newVersions.Name, "-m", newVersions.Name); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
+
+		if err := gitCommand("push", "origin", "HEAD", "--follow-tags"); err != nil {
+			log.Fail("Failed to git diff: %s", err)
+		}
 	}
 }
